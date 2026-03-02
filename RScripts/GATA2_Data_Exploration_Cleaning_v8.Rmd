@@ -1,0 +1,1755 @@
+---
+title: "GATA2_Survey_Data_Exploration"
+author: "Ashwin Koppayi"
+date: "2025-05-12"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Path Windows
+knitr::opts_knit$set(root.dir="/GATA2_Survey/REDCAP_DataExport")
+
+```
+
+
+```{r}
+path_plots<-"/Plots/" 
+#Read GATA2 Survey dataframe
+gata2_survey_data<-read.csv("GATA2SurveyData_DATA_2025-03-24_1500.csv")
+
+library(ggplot2)
+library(readxl)
+library(gplots)
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+library(pheatmap)
+library(reshape2)
+library(proxy)
+library("klaR")
+library(gridExtra)
+library(tidyr)
+library(forcats)
+library(arrow)
+library(epitools)
+library(stringr)
+
+
+```
+
+
+
+```{r}
+#Combining Similar Phenotypes 
+gata2_survey_data$lymphatic_vascular_thrombosis_combined <- ifelse(
+  gata2_survey_data$lymphatic_vascular_splenic_vein_thrombosis == "Y" |
+    gata2_survey_data$lymphatic_vascular_venous_thrombosis == "Y" |
+    gata2_survey_data$lymphatic_vascular_thrombotic_venous_events == "Y",
+  "Y", "N"
+)
+
+#Combining Similar Phenotypes 
+gata2_survey_data$lymphatic_vascular_lymphedema_combined <- ifelse(
+  gata2_survey_data$head_neck_eyes_lymphedema_limb_or_genital == "Y" |
+    gata2_survey_data$lymphatic_vascular_genital_lymphedema == "Y" |
+    gata2_survey_data$lymphatic_vascular_primary_uni_bilateral_lymphedema_lower_limb == "Y",
+  "Y", "N"
+)
+
+
+#Combining Similar Phenotypes 
+gata2_survey_data$viral_infections_ebv_infection_combined <- ifelse(
+  gata2_survey_data$viral_infections_ebv_virus == "Y" |
+    gata2_survey_data$viral_infections_chronic_active_ebv_disease == "Y" |
+    gata2_survey_data$viral_infections_ebv_infection == "Y",
+  "Y", "N"
+)
+
+
+
+#Combining Similar Phenotypes 
+gata2_survey_data$viral_infections_hpv_severe_disseminated_genital_extragenital_warts_combined <- ifelse(
+  gata2_survey_data$viral_infections_hpv_intraepithelial_bowenoid_papulosis == "Y" |
+    gata2_survey_data$viral_infections_hpv_severe_disseminated_genital_extragenital_warts == "Y",
+  "Y", "N"
+)
+
+
+#Combining Similar Phenotypes 
+gata2_survey_data$cancer_other_cancers <- ifelse(
+  gata2_survey_data$cancer_all == "Y" |
+    gata2_survey_data$cancer_other_cancers == "Y",
+  "Y", "N"
+)
+
+
+#Combining Similar Phenotypes 
+gata2_survey_data$head_neck_eyes_sensorineural_hearing_loss <- ifelse(
+  gata2_survey_data$head_neck_eyes_congenital_sensorineural_deafness == "Y" |
+    gata2_survey_data$head_neck_eyes_treatment_associated_hearing_loss == "Y",
+  "Y", "N"
+)
+
+
+#Convert 7.4.1 (Child age 10) preterm labor from "Y" to "NE"
+gata2_survey_data[218,153] <- "NE"
+
+#Blank Cells
+gata2_survey_data[311,63] <- "NE"
+gata2_survey_data[312,63] <- "NE"
+gata2_survey_data[169,108] <- "NE"
+
+
+#Same HGVS and Variant position so changing a variant
+#NM_032638.5(GATA2):c.202_203del p.(Val70LeufsTer114) to 
+#NM_032638.5(GATA2):c.207_208del p.(Val70LeufsTer114)
+gata2_survey_data[286,11]<-"NM_032638.5(GATA2):c.207_208del p.(Val70LeufsTer114)"
+
+
+```
+
+
+```{r}
+library(readxl)
+select_pheno_full<-read_excel("GATA2_Phenotypes_Final_v8.xlsx")
+select_pheno<-select_pheno_full[select_pheno_full$Keep_WithZero=="Yes",]
+
+
+phenotype_gata2<-gata2_survey_data[,38:178]
+phenotype_gata2<-phenotype_gata2[,colnames(phenotype_gata2)%in% select_pheno$Phenotype]
+rownames(phenotype_gata2)<-gata2_survey_data$prevalence_patient_deidentifier_lab_family_patient
+phenotype_gata2$Age<-gata2_survey_data$prevalence_age
+phenotype_gata2_adult_binary<-phenotype_gata2[phenotype_gata2$Age>=18,]
+
+phenotype_gata2_adult_binary$Y_count <- rowSums(phenotype_gata2_adult_binary == "Y")
+sum(phenotype_gata2_adult_binary$Y_count != 0)
+
+# Count number of "Y" per column
+y_counts <- colSums(phenotype_gata2_adult_binary == "Y")
+
+# Turn it into a table (data.frame) for readability
+y_counts_table <- data.frame(
+  Phenotype = names(y_counts),
+  Y_Count   = as.integer(y_counts)
+)
+
+
+# Count number of columns with at least 1 "Y"
+sum(y_counts_table$Y_Count != 0)
+
+non_zero<-y_counts_table[y_counts_table$Y_Count!=0,]
+
+
+select_pheno_107<-select_pheno[select_pheno$Present_in_GATA2=="Yes",]
+
+table(select_pheno_107$Keep_Adults)
+
+```
+
+
+```{r}
+library(dplyr)
+
+# ---- 0.  Handy vectors -------------------------------------------------------
+# Identify the phenotype columns (all the columns that start with "P", or list them explicitly)
+pheno_cols <- select_pheno$Phenotype   # adjust if needed
+
+# ---- 1.  Flag rows with at least one Y ---------------------------------------
+df <- phenotype_gata2 %>%
+  mutate(has_any_pheno = if_any(all_of(pheno_cols), ~ .x == "Y"))
+
+# ---- 2.  Overall counts ------------------------------------------------------
+total_cases       <- nrow(df)                  # should be 339
+total_asymptotic  <- sum(!df$has_any_pheno)    # rows with zero Y’s
+total_symptomatic <- total_cases - total_asymptotic
+
+# ---- 3.  Counts by age stratum ----------------------------------------------
+age_counts <- df %>%
+  mutate(age_group = if_else( Age < 18, "<18", "≥18")) %>%
+  group_by(age_group) %>%
+  summarise(
+    n_participants = n(),
+    n_asymptomatic = sum(!has_any_pheno),
+    n_symptomatic  = n_participants - n_asymptomatic,
+    .groups = "drop"
+  )
+
+# ---- 4.  Display -------------------------------------
+total_asymptotic
+age_counts
+
+```
+
+#Create Files for Combination Analysis
+```{r}
+phenotype_adult <- phenotype_gata2[phenotype_gata2$Age >= 18, ]
+
+# Initialize an empty list to store participant rownames for each phenotype
+phenotype_eid_list <- list()
+
+select_pheno<-select_pheno_full[select_pheno_full$Present_in_GATA2=="Yes" & select_pheno_full$Present_in_UKB=="Yes"&select_pheno_full$Keep_Adults=="Yes",]
+
+  # Loop through each row of select_pheno
+for (i in 1:nrow(select_pheno)) {
+  phenotype_index <- select_pheno$Phenotype_Index[i]
+  col_name <- select_pheno$Phenotype[i]  # Assuming this column contains the actual column name in phenotype_adult
+  
+  # Check if the column exists in phenotype_adult
+  if (col_name %in% colnames(phenotype_adult)) {
+    # Get rownames where the value is "Y"
+    matching_rows <- rownames(phenotype_adult)[phenotype_adult[[col_name]] == "Y"]
+  } else {
+    matching_rows <- character(0)  # If column does not exist, leave it empty
+  }
+  
+  # Add to list
+  phenotype_eid_list[[phenotype_index]] <- matching_rows
+}
+
+# Now convert this list to a dataframe (will need to fill shorter columns with NA)
+max_length <- max(sapply(phenotype_eid_list, length))
+
+phenotype_eid_df <- as.data.frame(
+  lapply(phenotype_eid_list, function(x) {
+    length(x) <- max_length  # Extend with NAs to make equal length
+    return(x)
+  }),
+  stringsAsFactors = FALSE
+)
+
+write.csv(phenotype_eid_df,"phenotype_eid_df_Adults_v8.csv",row.names=FALSE)
+
+```
+
+
+#Create Files for Combination Analysis for Pediatrics
+```{r}
+phenotype_ped <- phenotype_gata2[phenotype_gata2$Age < 18, ]
+
+# Initialize an empty list to store participant rownames for each phenotype
+phenotype_eid_list <- list()
+
+select_pheno<-select_pheno_full[select_pheno_full$Present_in_GATA2=="Yes" & select_pheno_full$Present_in_UKB=="Yes"&select_pheno_full$Keep_Adults=="Yes",]
+
+  # Loop through each row of select_pheno
+for (i in 1:nrow(select_pheno)) {
+  phenotype_index <- select_pheno$Phenotype_Index[i]
+  col_name <- select_pheno$Phenotype[i]  # Assuming this column contains the actual column name in phenotype_adult
+  
+  # Check if the column exists in phenotype_adult
+  if (col_name %in% colnames(phenotype_ped)) {
+    # Get rownames where the value is "Y"
+    matching_rows <- rownames(phenotype_ped)[phenotype_ped[[col_name]] == "Y"]
+  } else {
+    matching_rows <- character(0)  # If column does not exist, leave it empty
+  }
+  
+  # Add to list
+  phenotype_eid_list[[phenotype_index]] <- matching_rows
+}
+
+# Now convert this list to a dataframe (will need to fill shorter columns with NA)
+max_length <- max(sapply(phenotype_eid_list, length))
+
+phenotype_eid_df_ped <- as.data.frame(
+  lapply(phenotype_eid_list, function(x) {
+    length(x) <- max_length  # Extend with NAs to make equal length
+    return(x)
+  }),
+  stringsAsFactors = FALSE
+)
+
+write.csv(phenotype_eid_df_ped,"phenotype_eid_df_ped_v8.csv",row.names=FALSE)
+
+```
+
+#Find Coverage of 73 Phenotypes in GATA2
+```{r}
+# Suppose your dataframe is df
+unique_ids <- unique(unlist(phenotype_eid_df))       # Flatten everything and get unique IDs
+unique_ids <- unique_ids[!is.na(unique_ids)]   # Remove NAs
+
+# Coverage
+(length(unique_ids)/nrow(phenotype_adult))*100
+
+```
+
+```{r}
+summary_df <- df %>%
+  mutate(
+    has_any_pheno = if_any(all_of(pheno_cols), ~ .x == "Y"),
+    age_group     = if_else(Age < 18, "<18", "≥18"),
+    status        = if_else(has_any_pheno, "Symptomatic", "Asymptomatic")
+  ) %>%
+  count(age_group, status, name = "n_participants")
+
+
+# ------------------------------------------------------------------
+# 1.  Plot: stacked (or dodge) bar chart ---------------------------
+# ------------------------------------------------------------------
+ggplot(summary_df,
+       aes(x = age_group, y = n_participants, fill = status)) +
+  geom_col(position = "stack", width = 0.6) +          # use "dodge" for side‑by‑side
+  geom_text(aes(label = n_participants),
+            position = position_stack(vjust = 0.5),   # centered on each segment
+            size = 4, colour = "black") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
+  labs(title       = "GATA2 cases(n=339) by Age Group",
+       x           = "Age group",
+       y           = "Number of participants",
+       fill        = NULL) +
+  theme_classic(base_size = 14) +
+  theme(legend.position = "top")
+
+ggsave(paste0(path_plots,"Symptomatic_Asymptomatic_GATA2_By_Age.pdf"))
+
+```
+
+#Single Phenotype Counts comparison
+```{r}
+phenotype_ukb<-read_excel("Phenotype_pid_final_022526_v8.xlsx")
+single_pheno<-data.frame(Phenotype_Index=colnames(phenotype_eid_df))
+single_pheno<-merge(single_pheno,select_pheno[,c("Phenotype_Index","Phenotype_Description_Expanded","New_Category")],by="Phenotype_Index")
+
+single_pheno$Counts_GATA2<-rep(NA,nrow(single_pheno))
+single_pheno$Counts_UKB<-rep(NA,nrow(single_pheno))
+for(i in 1:nrow(single_pheno)){
+  print(i)
+  single_pheno$Counts_GATA2[i]<-sum(!is.na(phenotype_eid_df[,single_pheno$Phenotype_Index[i]]))
+    single_pheno$Counts_UKB[i]<-length(which(phenotype_ukb[,single_pheno$Phenotype_Index[i]]!=0))
+}
+
+write.csv(single_pheno,"SinglePheno_GATA2_v8.csv",row.names=FALSE)
+
+```
+
+
+
+#Genotype Summary
+```{r}
+
+
+variant_type<-read_excel("GATA2_Variants_Final.xlsx")
+
+
+
+#Same HGVS and Variant position so changing a variant
+#NM_032638.5(GATA2):c.202_203del p.(Val70LeufsTer114) to 
+#NM_032638.5(GATA2):c.207_208del p.(Val70LeufsTer114)
+gata2_survey_data[286,11]<-"NM_032638.5(GATA2):c.207_208del p.(Val70LeufsTer114)"
+
+
+variant_counts <- as.data.frame(table(variant_type$VariantType))
+
+# Rename the columns for clarity
+colnames(variant_counts) <- c("Variant_Type", "Count")
+
+
+
+# Calculate the percentage
+variant_counts$Percentage <- round(variant_counts$Count / sum(variant_counts$Count) * 100, 1)
+
+# Reorder the Variant_Type factor by decreasing percentage
+variant_counts <- variant_counts[order(-variant_counts$Percentage), ]
+variant_counts$Variant_Type <- factor(variant_counts$Variant_Type, levels = variant_counts$Variant_Type)
+
+variant_counts <- variant_counts %>%
+  mutate(pos = cumsum(Count) - Count / 2)
+variant_counts$Variant_Type<-gsub("_"," ",variant_counts$Variant_Type)
+
+library(dplyr)
+
+variant_counts <- variant_counts %>%
+  arrange(desc(Percentage), desc(Count)) %>%              # tie-break by Count if needed
+  mutate(Variant_Type = factor(Variant_Type, levels = Variant_Type))
+
+pdf(paste0(path_plots, "VariantType_Piechart1.pdf"))
+ggplot(variant_counts, aes(x = "", y = Count, fill = Variant_Type)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar(theta = "y") +
+  labs(title = "Distribution of Variant Types", fill = "Variant Type") +
+  geom_text(aes(label = paste0(Percentage, "%")),
+            position = position_stack(vjust = 0.5)) +
+  theme_void()
+dev.off()
+
+
+gata2_survey_data <- gata2_survey_data %>%
+  dplyr::left_join(
+    variant_type %>% dplyr::select(Var1, VariantType),
+    by = c("prevalence_variant_name" = "Var1")
+  )
+
+
+
+
+
+
+```
+
+
+#Frequency of Phenotype (Only the One's with >0 frequency,Expanded)
+```{r}
+# ─────────────────────────────────────────────────────────────
+# 0.  Libraries  (install with install.packages() if needed)
+# ─────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  Identify phenotype columns
+#     ⇨ tweak the grep() pattern if your column names differ
+# ─────────────────────────────────────────────────────────────
+mapping_df <- select_pheno %>%                # or read.csv("…")
+  dplyr::select(Phenotype, Phenotype_Description_Expanded,New_Category)
+colnames(mapping_df)[1]<-"Phenotype"
+pheno_cols <- mapping_df$Phenotype
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Build a tidy table of counts per phenotype × age group
+# ─────────────────────────────────────────────────────────────
+counts_df <- phenotype_gata2 %>%
+  mutate(age_group = if_else(Age < 18, "<18", "≥18")) %>%
+  pivot_longer(cols = all_of(pheno_cols),
+               names_to  = "Phenotype",
+               values_to = "value") %>%
+  filter(value == "Y") %>%               # keep only present phenotypes
+  count(age_group, Phenotype, name = "n")%>%
+  left_join(mapping_df, by = "Phenotype")  
+
+# ─────────────────────────────────────────────────────────────
+# 3.  Define a tiny helper that returns a ggplot for one stratum
+# ─────────────────────────────────────────────────────────────
+make_plot <- function(.data, group_label, top_n = 200) {
+  .data %>%
+    filter(age_group == group_label) %>%
+    slice_max(order_by = n, n = top_n, with_ties = FALSE) %>%
+    ggplot(aes(x = reorder(Phenotype_Description_Expanded, n), y = n, fill = New_Category)) +
+      geom_col(width = 0.7) +
+      geom_text(aes(label = n), hjust = -0.15, size = 4.0) +
+      coord_flip(clip = "off") +
+    scale_fill_brewer(palette = "Set3") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+      labs(title = paste0("Frequency of Phenotypes in ", group_label, " years"),
+           x     = NULL,
+           y     = "Number of participants",
+           fill  = "Category") +
+      theme_classic(base_size = 13)+
+    theme(axis.text.y = element_text(size = 11,face="bold") )
+}
+
+# ─────────────────────────────────────────────────────────────
+# 4.  Create the two plots
+# ─────────────────────────────────────────────────────────────
+plot_under18 <- make_plot(counts_df, "<18")
+plot_adult   <- make_plot(counts_df, "≥18")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  Save each to its own PDF
+# ─────────────────────────────────────────────────────────────
+ggsave(paste0(path_plots,"phenotypes_under18_nonzero_only_expanded.pdf"),
+       plot   = plot_under18,
+       width  = 12, height = 15, units = "in")
+
+ggsave(paste0(path_plots,"phenotypes_adults_nonzero_only_expanded.pdf"),
+       plot   = plot_adult,
+       width  = 12, height = 15, units = "in")
+
+```
+
+#Frequency of Phenotype (Only the One's with >0 frequency,v2)
+```{r}
+# ─────────────────────────────────────────────────────────────
+# 0.  Libraries  (install with install.packages() if needed)
+# ─────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  Identify phenotype columns
+#     ⇨ tweak the grep() pattern if your column names differ
+# ─────────────────────────────────────────────────────────────
+mapping_df <- select_pheno %>%                # or read.csv("…")
+  dplyr::select(Phenotype, Phenotype_Description_v2,New_Category)
+colnames(mapping_df)[1]<-"Phenotype"
+pheno_cols <- mapping_df$Phenotype
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Build a tidy table of counts per phenotype × age group
+# ─────────────────────────────────────────────────────────────
+counts_df <- phenotype_gata2 %>%
+  mutate(age_group = if_else(Age < 18, "<18", "≥18")) %>%
+  pivot_longer(cols = all_of(pheno_cols),
+               names_to  = "Phenotype",
+               values_to = "value") %>%
+  filter(value == "Y") %>%               # keep only present phenotypes
+  count(age_group, Phenotype, name = "n")%>%
+  left_join(mapping_df, by = "Phenotype")  
+
+# ─────────────────────────────────────────────────────────────
+# 3.  Define a tiny helper that returns a ggplot for one stratum
+# ─────────────────────────────────────────────────────────────
+make_plot <- function(.data, group_label, top_n = 200) {
+  .data %>%
+    filter(age_group == group_label) %>%
+    slice_max(order_by = n, n = top_n, with_ties = FALSE) %>%
+    ggplot(aes(x = reorder(Phenotype_Description_v2, n), y = n, fill = New_Category)) +
+      geom_col(width = 0.7) +
+      geom_text(aes(label = n), hjust = -0.15, size = 4.0) +
+      coord_flip(clip = "off") +
+    scale_fill_brewer(palette = "Set3") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+      labs(title = paste0("Frequency of Phenotypes in ", group_label, " years"),
+           x     = "Observed Phenotypes",
+           y     = "Number of participants",
+           fill  = "Category") +
+      theme_classic(base_size = 13)+
+    theme(axis.text.y = element_text(size = 11,face="plain"))
+}
+
+# ─────────────────────────────────────────────────────────────
+# 4.  Create the two plots
+# ─────────────────────────────────────────────────────────────
+plot_under18 <- make_plot(counts_df, "<18")
+plot_adult   <- make_plot(counts_df, "≥18")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  Save each to its own PDF
+# ─────────────────────────────────────────────────────────────
+ggsave(paste0(path_plots,"phenotypes_under18_nonzero_only_expanded_v2.pdf"),
+       plot   = plot_under18,
+       width  = 12, height = 15, units = "in")
+
+ggsave(paste0(path_plots,"phenotypes_adults_nonzero_only_expanded_v2.pdf"),
+       plot   = plot_adult,
+       width  = 12, height = 15, units = "in")
+
+```
+
+
+
+#Frequency of 73 Phenotypes used in combination analysis (frequency,v2)
+```{r}
+# ─────────────────────────────────────────────────────────────
+# 0.  Libraries  (install with install.packages() if needed)
+# ─────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  Identify phenotype columns
+#     ⇨ tweak the grep() pattern if your column names differ
+# ─────────────────────────────────────────────────────────────
+mapping_df <- select_pheno[select_pheno$Phenotype_Index%in%select_pheno$Phenotype_Index,] %>%                # or read.csv("…")
+  dplyr::select(Phenotype, Phenotype_Description_v2,New_Category)
+
+colnames(mapping_df)[1]<-"Phenotype"
+pheno_cols <- mapping_df$Phenotype
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Build a tidy table of counts per phenotype × age group
+# ─────────────────────────────────────────────────────────────
+counts_df <- phenotype_gata2 %>%
+  mutate(age_group = if_else(Age < 18, "<18", "≥18")) %>%
+  pivot_longer(cols = all_of(pheno_cols),
+               names_to  = "Phenotype",
+               values_to = "value") %>%
+  filter(value == "Y") %>%               # keep only present phenotypes
+  count(age_group, Phenotype, name = "n")%>%
+  left_join(mapping_df, by = "Phenotype")  
+
+# ─────────────────────────────────────────────────────────────
+# 3.  Define a tiny helper that returns a ggplot for one stratum
+# ─────────────────────────────────────────────────────────────
+make_plot <- function(.data, group_label, top_n = 200) {
+  .data %>%
+    filter(age_group == group_label) %>%
+    slice_max(order_by = n, n = top_n, with_ties = FALSE) %>%
+    ggplot(aes(x = reorder(Phenotype_Description_v2, n), y = n, fill = New_Category)) +
+      geom_col(width = 0.7) +
+      geom_text(aes(label = n), hjust = -0.15, size = 4.0) +
+      coord_flip(clip = "off") +
+    scale_fill_brewer(palette = "Set3") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+      labs(
+           x     = "Observed phenotypes",
+           y     = "Number of participants",
+           fill  = "Category") +
+      theme_classic(base_size = 13)+
+    theme(axis.text.y = element_text(size = 11,face="plain") ) +
+  theme(legend.position = c(0.5, 0.2))
+}
+
+# ─────────────────────────────────────────────────────────────
+# 4.  Create the two plots
+# ─────────────────────────────────────────────────────────────
+plot_under18 <- make_plot(counts_df, "<18")
+plot_adult   <- make_plot(counts_df, "≥18")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  Save each to its own PDF
+# ─────────────────────────────────────────────────────────────
+ggsave(paste0(path_plots,"73phenotypes_under18_nonzero_only_expanded_v2.pdf"),
+       plot   = plot_under18,
+       width  = 12, height = 15, units = "in")
+
+ggsave(paste0(path_plots,"73phenotypes_adults_nonzero_only_expanded_v2.pdf"),
+       plot   = plot_adult,
+       width  = 12, height = 15, units = "in")
+
+```
+
+
+
+
+#Including Zero 
+
+```{r}
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Build a tidy table of counts per phenotype × age group
+# ─────────────────────────────────────────────────────────────
+# All possible combinations of age_group × phenotype
+all_combos <- expand.grid(
+  age_group = c("<18", "≥18"),
+  Phenotype = pheno_cols,
+  stringsAsFactors = FALSE
+)
+
+counts_df <- phenotype_gata2 %>%
+  mutate(age_group = if_else(Age < 18, "<18", "≥18")) %>%
+  pivot_longer(cols = all_of(pheno_cols),
+               names_to  = "Phenotype",
+               values_to = "value") %>%
+  filter(value == "Y") %>%
+  count(age_group, Phenotype, name = "n") %>%
+  right_join(all_combos, by = c("age_group", "Phenotype")) %>%   # keep 0 counts
+  mutate(n = replace_na(n, 0)) %>%
+  left_join(mapping_df, by = "Phenotype")
+
+# ─────────────────────────────────────────────────────────────
+# 3.  Define a tiny helper that returns a ggplot for one stratum
+# ─────────────────────────────────────────────────────────────
+make_plot <- function(.data, group_label, top_n = 200) {
+  .data %>%
+    filter(age_group == group_label) %>%
+    slice_max(order_by = n, n = top_n, with_ties = FALSE) %>%
+    ggplot(aes(x = reorder(Phenotype_Description_v2, n), y = n, fill = New_Category)) +
+      geom_col(width = 0.7) +
+      geom_text(aes(label = n), hjust = -0.15, size = 3.5) +
+      coord_flip(clip = "off") +
+    scale_fill_brewer(palette = "Set3") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+      labs(title = paste0("Frequency of Phenotypes in ", group_label, " years"),
+           x     = NULL,
+           y     = "Number of participants",
+           fill  = "Category") +
+      theme_classic(base_size = 12)
+}
+
+# ─────────────────────────────────────────────────────────────
+# 4.  Create the two plots
+# ─────────────────────────────────────────────────────────────
+plot_under18 <- make_plot(counts_df, "<18")
+plot_adult   <- make_plot(counts_df, "≥18")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  Save each to its own PDF
+# ─────────────────────────────────────────────────────────────
+ggsave(paste0(path_plots,"phenotypes_under18_withall.pdf"),
+       plot   = plot_under18,
+       width  = 12, height = 15, units = "in")
+
+ggsave(paste0(path_plots,"phenotypes_adults_withall.pdf"),
+       plot   = plot_adult,
+       width  = 12, height = 15, units = "in")
+
+```
+
+
+
+
+#Combined Frequency
+```{r}
+# ─────────────────────────────────────────────────────────────
+# 4-bis.  One combined plot: adults vs <18, ordered by adults
+# ─────────────────────────────────────────────────────────────
+top_n <- 200          # change or remove this line to keep more/fewer phenotypes
+
+# 4-bis-A.  Get the order based on the adult stratum
+adult_order <- counts_df %>%
+  filter(age_group == "≥18") %>%                 # keep adults only
+  arrange(n) %>%                           # sort by descending count
+  { if (!is.null(top_n)) slice_head(., n = top_n) else . } %>%  # optional top-n
+  pull(Phenotype_Description_v2)
+
+# 4-bis-B.  Build the plot
+plot_combined <- counts_df %>%
+  filter(Phenotype_Description_v2 %in% adult_order) %>%            # keep same set in both groups
+  mutate(Phenotype_Description = factor(Phenotype_Description_v2,
+                                        levels = adult_order)) %>%  # set factor order
+  ggplot(aes(x = Phenotype_Description_v2, y = n, fill = age_group)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    #geom_text(aes(label = n),
+    #          position = position_dodge(width = 0.8),
+     #         hjust = -0.15, size = 3.5) +
+    coord_flip(clip = "off") +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+    scale_fill_manual(values = c("≥18" = "#1f77b4", "<18" = "#ff7f0e"),
+                      name   = "Age group") +
+    labs(title = "Frequency of phenotypes by age group",
+         x     = NULL,
+         y     = "Number of participants") +
+    theme_classic(base_size = 12)
+
+# ─────────────────────────────────────────────────────────────
+# 4-bis-C.  Save the figure
+# ─────────────────────────────────────────────────────────────
+ggsave(paste0(path_plots,"phenotypes_combined_top200.pdf"),
+       plot   = plot_combined,
+       width  = 12, height = 15, units = "in")
+
+```
+
+
+#Original Plot Showing the NE values
+
+#Summary of Frequency of phenotypes
+```{r}
+#Remove the 
+phenotype_gata2_og<-phenotype_gata2
+phenotype_gata2<-phenotype_gata2 %>% dplyr::select(-Age)
+
+#Initlize empty dataframe for getting the frequency of phenotypes
+frequency<-data.frame(matrix(0,nrow=ncol(phenotype_gata2),ncol=3))
+colnames(frequency)<-c("Y","N","NE")
+
+
+for( i in 1:length(colnames(phenotype_gata2))){
+#print(i)
+  data<-as.data.frame(table(phenotype_gata2[,i]))
+  row.names(frequency)[i]<-colnames(phenotype_gata2[i])
+  frequency$Y[i]<-ifelse(identical(data$Freq[data$Var1=="Y"],integer(0)),0,data$Freq[data$Var1=="Y"])
+  frequency$N[i]<-ifelse(identical(data$Freq[data$Var1=="N"],integer(0)),0,data$Freq[data$Var1=="N"])
+  frequency$NE[i]<-ifelse(identical(data$Freq[data$Var1=="NE"],integer(0)),0,data$Freq[data$Var1=="NE"])
+  
+}
+
+library(ggplot2)
+library(reshape2)
+library(tibble)
+
+mapping_df <- select_pheno %>%                # or read.csv("…")
+  dplyr::select(Phenotype, Phenotype_Description_v2,New_Category)
+colnames(mapping_df)[1]<-"Phenotype"
+pheno_cols <- mapping_df$Phenotype
+
+
+frequency_short<-frequency[,1:3]
+frequency_short<-rownames_to_column(frequency_short,var="Phenotype")
+colnames(frequency_short)<-c("Phenotype","Y","N","NE")
+frequency_long <- melt(frequency_short, id.vars = "Phenotype", 
+                  variable.name = "Response", 
+                  value.name = "Frequency")
+frequency_short$Total<-frequency_short$Y+ frequency_short$N +frequency_short$NE
+
+# Adjust the factor levels
+frequency_long$Response <- factor(frequency_long$Response, levels = c("Y","N","NE"))
+
+frequency_long<-merge(frequency_long,mapping_df,by="Phenotype")
+
+
+```
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+## 1.  Get the “Y” counts per phenotype and rank them
+order_levels <- frequency_long %>% 
+  filter(Response %in% c("Frequency_Y", "Y")) %>%   # adjust if your Y code is just "Y"
+  group_by(Phenotype_Description_v2) %>%               # one phenotype per line
+  summarise(Y_freq = sum(Frequency), .groups = "drop") %>% 
+  arrange(desc(Y_freq)) %>%                         # highest Y first
+  pull(Phenotype_Description_v2)                       # keep only the names
+
+## 2.  Apply that order to the factor
+frequency_long$Phenotype_Description_v2 <- factor(
+  frequency_long$Phenotype_Description_v2,
+  levels = order_levels
+)
+
+
+# 100 % color‑blind‑friendly (Okabe‑Ito)
+cb_palette <- c(
+  Y  = "#0072B2",   # blue
+  N  = "#D55E00",   # vermillion
+  NE = "#F0E442"    # yellow
+)
+
+pdf(paste0(path_plots,"Frequency_phenotype_stacked_v2_final.pdf"),width=15,height=20)
+ggplot(frequency_long,
+       aes(x = Phenotype_Description_v2, y = Frequency, fill = Response)) +
+  geom_col(color = "black",
+           position = position_stack(reverse = TRUE, vjust = 1.05)) +
+  scale_fill_manual(values = cb_palette,      # ⬅️  new line
+                    name   = "Response",
+                    labels = c(Frequency_Y = "Y", Frequency_N = "N", Frequency_NE = "NE")) +
+  labs(
+       x = "Phenotype",
+       y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1,size = 11),panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank())
+dev.off()
+```
+
+
+
+#Missingness by Site
+```{r}
+site_missingness<-cbind(gata2_survey_data$prevalence_lab_expert,phenotype_gata2)
+
+colnames(site_missingness)[1]<-"Prevalence_lab_expert"
+
+# Convert Category to a factor to control the order of bars
+site_missingness$Prevalence_lab_expert <- factor(site_missingness$Prevalence_lab_expert , levels = rev(unique(site_missingness$Prevalence_lab_expert)))
+
+site_missingness$Prevalence_lab_expert<-gsub("14. NIH ","14. NIH",site_missingness$Prevalence_lab_expert)
+
+summary(as.factor(site_missingness$Prevalence_lab_expert))
+
+
+# Convert frequency table to dataframe
+summary_df <- as.data.frame(table(site_missingness$Prevalence_lab_expert))
+summary_df <- summary_df[order(-summary_df$Freq), ]
+summary_df$Var1<-as.character(summary_df$Var1)
+
+site_map_file<-read.csv("Site_Map_File.csv")
+
+
+
+
+
+summary_df<-merge(summary_df,site_map_file,by.x="Var1",by.y="Site_GATA2",all=TRUE)
+
+library(dplyr)
+
+summary_grouped <- summary_df %>%
+  group_by(Site) %>%
+  summarise(Freq = sum(Freq), .groups = "drop")
+
+write.csv(summary_df,"Site_Map_File_Summary.csv",row.names=FALSE)
+# Plot using ggplot2
+library(ggplot2)
+library(dplyr)
+library(forcats)
+
+
+
+summary_grouped <- summary_df %>%
+  dplyr::mutate(Site = str_trim(Site)) %>%  # Trim leading/trailing spaces
+  dplyr::group_by(Site) %>%
+  summarise(Freq = sum(Freq), .groups = "drop")
+# Ensure Site is ordered by Freq decreasing
+summary_grouped <- summary_grouped %>%
+  mutate(Site = fct_reorder(Site, Freq, .desc = TRUE))
+
+  pdf(paste0(path_plots,"Number_of_GATA2_Cases_by_Site.pdf"),width=8,height=6)
+  ggplot(summary_grouped, aes(x = Site, y = Freq, fill = Site)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = Freq), vjust = -0.5, size = 3) +
+    labs(x = "Site", y = "Frequency", title = "Number of GATA2 Deficient Cases at each site") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  dev.off()
+```
+```{r}
+# (optional) make sure keys are comparable
+summary_df$Var1 <- trimws(as.character(summary_df$Var1))
+site_missingness$Prevalence_lab_expert <- trimws(as.character(site_missingness$Prevalence_lab_expert))
+
+# add Site by matching keys
+site_missingness$Site <- summary_df$Site[
+  match(site_missingness$Prevalence_lab_expert, summary_df$Var1)
+]
+
+```
+
+
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# Clean keys
+summary_df <- summary_df %>%
+  mutate(Site = str_trim(as.character(Site)),
+         Var1 = str_trim(as.character(Var1)))
+
+site_missingness <- site_missingness %>%
+  mutate(Prevalence_lab_expert = str_trim(as.character(Prevalence_lab_expert)))
+
+# 1) One row per Site with total n (Freq)
+summary_df_group <- summary_df %>%
+  group_by(Site) %>%
+  summarise(Freq = sum(Freq, na.rm = TRUE), .groups = "drop")
+
+cat("Unique sites:", nrow(summary_df_group), "\n")
+
+# Optional: define label order to match your 3 colors (edit if your labels differ)
+# expected_levels <- c("Not Missing", "Missing", "Unknown")
+
+# 2) Plot per-site pies
+pdf(paste0(path_plots, "Combined_bar_plot.pdf"),width=7,height=8)
+
+n_sites <- nrow(summary_df_group)
+n_cols  <- 3
+n_rows  <- ceiling(n_sites / n_cols)
+par(mfrow = c(n_rows, n_cols), cex.axis = 1)
+
+for (i in seq_len(n_sites)) {
+  site_name <- summary_df_group$Site[i]
+  n_value   <- summary_df_group$Freq[i]
+
+  # All Var1 for this Site
+  var1_list <- summary_df %>%
+    filter(Site == site_name) %>%
+    pull(Var1) %>%
+    unique()
+
+  # Subset missingness rows for those Var1 values
+  missing_by_site <- site_missingness %>%
+    filter(Prevalence_lab_expert %in% var1_list) %>%
+    dplyr::select(-c(Prevalence_lab_expert,Site))
+
+  # Flatten to a vector of labels; drop NA/blank
+  vals <- unlist(missing_by_site, use.names = FALSE)
+  vals <- vals[!is.na(vals) & vals != ""]
+
+  if (length(vals) > 0) {
+    frequency_site <- table(vals)
+
+    # If you want fixed order & to align colors, uncomment the two lines below and set expected_levels above
+    # frequency_site <- table(factor(vals, levels = expected_levels))
+    # frequency_site <- frequency_site[frequency_site > 0]
+
+    pie(
+      frequency_site,
+      labels = paste0(
+        names(frequency_site), ": ",
+        round(100 * as.numeric(frequency_site) / sum(frequency_site), 2), "%"
+      ),
+      main = paste0(site_name, "\n", "n = ", n_value),
+      col  = c("#D55E00","#F0E442","#0072B2")  # adjust if you change label order
+    )
+  } else {
+    plot.new()
+    text(1, 1, paste0(site_name, "\nNo data"))
+  }
+}
+
+par(mfrow = c(1, 1))
+dev.off()
+
+```
+
+
+
+```{r}
+# --- libraries ---
+library(dplyr)
+library(stringr)
+
+# --- tweakables ---
+PIE_RADIUS   <- 0.80   # pie size (smaller = more margin)
+LABEL_RADIUS <- 1.15   # >1 moves labels away from the pie
+LABEL_CEX    <- 0.8    # label text size
+LABEL_COLORS <- c("#D55E00", "#F0E442", "#0072B2")  # make sure order matches your levels
+
+# --- clean keys ---
+summary_df <- summary_df %>%
+  mutate(
+    Site = str_trim(as.character(Site)),
+    Var1 = str_trim(as.character(Var1))
+  )
+
+site_missingness <- site_missingness %>%
+  mutate(Prevalence_lab_expert = str_trim(as.character(Prevalence_lab_expert)))
+
+# --- one row per Site with total n (Freq) ---
+summary_df_group <- summary_df %>%
+  group_by(Site) %>%
+  summarise(Freq = sum(Freq, na.rm = TRUE), .groups = "drop")
+
+cat("Unique sites:", nrow(summary_df_group), "\n")
+
+# --- output device ---
+pdf(paste0(path_plots, "Combined_bar_plot_o2.pdf"), width = 8, height = 10)
+
+n_sites <- nrow(summary_df_group)
+n_cols  <- 3
+n_rows  <- ceiling(n_sites / n_cols)
+par(mfrow = c(n_rows, n_cols), cex.axis = 1)
+
+for (i in seq_len(n_sites)) {
+  site_name <- summary_df_group$Site[i]
+  n_value   <- summary_df_group$Freq[i]
+
+  # All Var1 for this Site
+  var1_list <- summary_df %>%
+    filter(Site == site_name) %>%
+    pull(Var1) %>%
+    unique()
+
+  # Subset missingness rows for those Var1 values
+  missing_by_site <- site_missingness %>%
+    filter(Prevalence_lab_expert %in% var1_list) %>%
+    dplyr::select(-c(Prevalence_lab_expert, Site))
+
+  # Flatten to a vector of labels; drop NA/blank
+  vals <- unlist(missing_by_site, use.names = FALSE)
+  vals <- vals[!is.na(vals) & vals != ""]
+
+  if (length(vals) > 0) {
+    frequency_site <- table(vals)
+
+    # (Optional) enforce a fixed order to match colors:
+    # expected_levels <- c("Not Missing", "Missing", "Unknown")
+    # frequency_site <- table(factor(vals, levels = expected_levels))
+    # frequency_site <- frequency_site[frequency_site > 0]
+
+    # Build label text
+    pct <- round(100 * as.numeric(frequency_site) / sum(frequency_site), 2)
+    pie_labels <- paste0(names(frequency_site), ": ", pct, "%")
+
+    # Draw pie WITHOUT labels first (we'll place them manually)
+    pie(
+      frequency_site,
+      labels = NA,
+      main   = paste0(site_name, "\n", "n = ", n_value),
+      col    = LABEL_COLORS,
+      radius = PIE_RADIUS
+    )
+
+    # Compute mid-angles of slices (in radians)
+    mids <- cumsum(frequency_site) - frequency_site / 2
+    mids <- 2 * pi * mids / sum(frequency_site)
+
+    # Place labels slightly outside the pie
+    x <- LABEL_RADIUS * sin(mids)
+    y <- LABEL_RADIUS * cos(mids)
+    text(x, y, labels = pie_labels, cex = LABEL_CEX)
+
+  } else {
+    plot.new()
+    text(0.5, 0.5, paste0(site_name, "\nNo data"))
+  }
+}
+
+par(mfrow = c(1, 1))
+dev.off()
+
+```
+
+```{r}
+# --- Libraries ---
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+
+# --- Clean ---
+summary_df <- summary_df %>%
+  mutate(
+    Site = str_trim(as.character(Site)),
+    Var1 = str_trim(as.character(Var1))
+  )
+
+site_missingness <- site_missingness %>%
+  mutate(Prevalence_lab_expert = str_trim(as.character(Prevalence_lab_expert)))
+
+# --- Map each Var1 to its Site(s) ---
+var_by_site <- summary_df %>%
+  distinct(Site, Var1)
+
+# --- Identify phenotype columns (all Y/N/NE columns) ---
+response_cols <- setdiff(names(site_missingness), c("Prevalence_lab_expert", "Site"))
+
+# --- Join safely ---
+long_df <- site_missingness %>%
+  # Keep only phenotype columns and the join key
+  dplyr::select(Prevalence_lab_expert, all_of(response_cols)) %>%
+  inner_join(var_by_site, by = c("Prevalence_lab_expert" = "Var1")) %>%
+  pivot_longer(
+    cols = all_of(response_cols),
+    names_to = "Phenotype",
+    values_to = "Response"
+  ) %>%
+  filter(Response %in% c("Y", "N", "NE")) %>%
+  dplyr::select(Site, Phenotype, Response)
+# --- Count and percentage per site ---
+site_counts <- long_df %>%
+  count(Site, Response, name = "Count") %>%
+  group_by(Site) %>%
+  mutate(Total = sum(Count),
+         Percent = 100 * Count / Total) %>%
+  ungroup()
+
+# --- Ensure consistent ordering of responses ---
+site_counts <- site_counts %>%
+  mutate(Response = factor(Response, levels = c("N", "NE", "Y")))
+
+pdf(paste0(path_plots, "MissingNess_By_Site.pdf"), width = 8, height = 6)
+# --- Plot stacked horizontal barplot ---
+ggplot(site_counts, aes(x = Percent, y = reorder(Site, Total), fill = Response)) +
+  geom_col(width = 0.7) +
+  scale_x_continuous(limits = c(0, 100), breaks = seq(0, 100, 10),
+                     labels = function(x) paste0(x, "%")) +
+  scale_fill_manual(values = c("N" = "#D55E00", "NE" = "#F0E442", "Y" = "#0072B2")) +
+  labs(
+    x = "Percentage of Response",
+    y = "Site",
+    fill = "Response",
+      ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    legend.position = "top",
+    panel.grid.major=element_blank(),
+    panel.grid.minor=element_blank()
+  )
+
+dev.off()
+
+```
+
+
+
+
+
+```{r}
+# ─────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  Mapping table: code  →  description
+# ─────────────────────────────────────────────────────────────
+
+mapping_df <- select_pheno %>% dplyr::select(Phenotype, Phenotype_Description)
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Identify phenotype columns present in the main data frame
+# ─────────────────────────────────────────────────────────────
+pheno_cols <- mapping_df$Phenotype         # e.g. "P1"…"P77"
+
+
+wide_df <- phenotype_gata2_og %>%
+  dplyr::select(Age, all_of(pheno_cols)) %>%
+  mutate(across(all_of(pheno_cols), ~ ifelse(.x == "Y", "Y", ifelse(.x == "N", "N", "NE")))) %>%
+  mutate(age_group = if_else(Age < 18, "<18", "≥18"))
+
+heat_mat <- wide_df %>%
+  dplyr::select(all_of(pheno_cols)) %>%
+  as.matrix()
+
+colnames(heat_mat) <- mapping_df$Phenotype_Description[
+  match(colnames(heat_mat), mapping_df$Phenotype)
+]
+
+heatmap_colors <- c(
+  "Y"  = "#0072B2",    # Blue
+  "N"  = "#D55E00",    # Vermillion
+  "NE" = "#FFFFFF"     # White
+)
+# Map Y/N/NE to 1/2/3 for plotting
+heat_mat_numeric <- matrix(
+  dplyr::recode(heat_mat, Y = 1L, N = 2L, NE = 3L),
+  nrow = nrow(heat_mat),
+  ncol = ncol(heat_mat),
+  dimnames = dimnames(heat_mat)
+)
+# set up color vector
+my_colors <- c("#0072B2", "#D55E00", "#FFFFFF")
+names(my_colors) <- c("1", "2", "3")
+
+heat_mat_numeric_t <- t(heat_mat_numeric)
+
+pdf(paste0(path_plots,"Heatmap_Combined_normal.pdf"), width = 15, height =11 )
+pheatmap(
+  heat_mat_numeric,
+  color = my_colors,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+
+  annotation_colors = list(Age = c("<18" = "#fc8d59", "≥18" = "#99d594")),
+ 
+  show_rownames = FALSE,
+  fontsize_col = 8,
+  main = "Phenotype presence by age group (n = 339)"
+)
+dev.off()
+```
+
+```{r}
+heat_mat_og<-heat_mat
+heat_mat_df <- as.data.frame(heat_mat)
+heat_mat_df$ParticipantID <- rownames(heat_mat)
+# Merge variant type info
+heat_mat_df <- heat_mat_df %>%
+  left_join(
+    gata2_survey_data %>% dplyr::select(prevalence_patient_deidentifier_lab_family_patient, VariantType),
+    by = c("ParticipantID" = "prevalence_patient_deidentifier_lab_family_patient")
+  )
+```
+
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+heat_long <- heat_mat_df %>%
+  pivot_longer(
+    cols = -ParticipantID,        # all phenotype columns
+    names_to = "Phenotype",
+    values_to = "Status"
+  )
+
+heat_long <- heat_long %>%
+  left_join(
+    gata2_survey_data[, c("prevalence_patient_deidentifier_lab_family_patient", "VariantType")],
+    by = c("ParticipantID" = "prevalence_patient_deidentifier_lab_family_patient")
+  )
+
+
+heat_long_unique <- heat_long %>%
+  filter(Status == "Y") %>%
+  group_by(ParticipantID, Phenotype) %>%
+  summarise(
+    VariantType = paste(unique(VariantType), collapse = "; "),
+    .groups = "drop"
+  )
+
+# Now pivot wider safely:
+heat_wide <- heat_long_unique %>%
+  pivot_wider(
+    names_from = Phenotype,
+    values_from = VariantType
+  )
+
+# Make matrix:
+heatmap_matrix <- heat_wide %>%
+  column_to_rownames("ParticipantID") %>%
+  as.matrix()
+
+heatmap_matrix[is.na(heatmap_matrix)] <- ""
+
+
+
+
+```
+
+
+
+
+#Heatmap Oncoprint
+
+```{r}
+library(ComplexHeatmap)
+library(grid)
+
+# Define your mutation colors properly
+mutation_colors <- c(
+  "Missense_Mutation" = "#E64B35",
+  "Nonsense_Mutation" = "#4DBBD5",
+  "Large_Deletion" = "#7E6148",
+  "Inframe_Insertion" = "#B09C85",
+  "Frameshift_Deletion" = "#FF7F00",
+  "Noncoding_Mutation" = "#6A3D9A",
+  "Frameshift_Insertion" = "#1F78B4",
+  "Indel" = "#A6CEE3",
+  "Synonymous" = "#B2DF8A",
+  "Inframe_Deletion" = "#33A02C"
+)
+
+# Define background
+alter_fun <- list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w, h, gp = gpar(fill = "grey90", col = NA))
+  }
+)
+
+# Correctly capture color inside loop using local()
+for (mutation in names(mutation_colors)) {
+  alter_fun[[mutation]] <- local({
+    mut <- mutation  # capture current mutation name
+    function(x, y, w, h) {
+      grid.rect(x, y, w * 0.9, h * 0.9, gp = gpar(fill = mutation_colors[[mut]], col = NA))
+    }
+  })
+}
+
+
+library(ComplexHeatmap)
+library(grid)
+
+# count “any alteration present” per row (adjust if your matrix stores data differently)
+mut_counts <- rowSums(heatmap_matrix != "" & !is.na(heatmap_matrix))
+
+ra <- rowAnnotation(
+  Alterations = anno_barplot(
+    mut_counts,
+    border = FALSE,
+    axis_param = list(side = "bottom")
+  ),
+  annotation_width = unit(1.6, "cm")
+)
+
+# Plot
+pdf(paste0(path_plots,"OncoPrint_2.pdf"), width = 15, height =20 )
+oncoPrint(
+  heatmap_matrix,
+  alter_fun = alter_fun,
+  col = mutation_colors,
+  remove_empty_columns = TRUE,
+  remove_empty_rows = TRUE,
+  show_column_names = TRUE,
+  alter_fun_is_vectorized = FALSE,
+  show_pct = FALSE,
+  show_row_names = FALSE,
+  column_title = "Phenotypic Profile of GATA2 Deficiency Cases",
+  row_title = "Participants",
+  right_annotation = ra
+)
+
+ dev.off()
+```
+
+
+
+
+
+```{r}
+
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+
+library(pheatmap)
+heat_mat_child <- heat_mat[wide_df$age_group == "<18", , drop = FALSE]
+col_child <- colSums(heat_mat_child == "Y", na.rm = TRUE) > 0
+heat_mat_child <- heat_mat_child[ , col_child, drop = FALSE]
+
+heat_mat_adult <- heat_mat[wide_df$age_group == "≥18", , drop = FALSE]
+col_adult <- colSums(heat_mat_adult == "Y", na.rm = TRUE) > 0
+heat_mat_adult <- heat_mat_adult[ , col_adult, drop = FALSE]
+
+
+# For pheatmap: map Y/N/NE to 1/2/3
+heat_mat_child_num <- matrix(
+  dplyr::recode(heat_mat_child, Y = 1L, N = 2L, NE = 3L),
+  nrow = nrow(heat_mat_child),
+  ncol = ncol(heat_mat_child),
+  dimnames = dimnames(heat_mat_child)
+)
+heat_mat_adult_num <- matrix(
+  dplyr::recode(heat_mat_adult, Y = 1L, N = 2L, NE = 3L),
+  nrow = nrow(heat_mat_adult),
+  ncol = ncol(heat_mat_adult),
+  dimnames = dimnames(heat_mat_adult)
+)
+my_colors <- c("#0072B2", "#D55E00", "#FFFFFF")
+names(my_colors) <- c("1", "2", "3")
+
+
+library(grid)
+
+pdf(paste0(path_plots,"Phenotype_heatmap_Over18.pdf"), width = 15, height =11 )
+pheatmap(
+  heat_mat_child_num,
+  color = my_colors,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  fontsize_col = 8,
+  main = paste0("Phenotype presence <18 years (n = ", nrow(heat_mat_child_num), ")"),
+  legend = FALSE
+)
+# After pheatmap, add a custom legend using grid
+grid::grid.rect(x = 0.91, y = 0.7, width = 0.12, height = 0.16, gp = gpar(fill = "white", col = NA)) # optional: white background for legend
+legend_labels <- c("Y", "N", "NE")
+legend_colors <- c("#0072B2", "#D55E00", "#FFFFFF")
+y_start <- 0.77
+y_gap <- 0.05
+for(i in seq_along(legend_labels)) {
+  grid::grid.rect(x = 0.85, y = y_start - (i - 1)*y_gap, width = 0.03, height = 0.04,
+                  gp = grid::gpar(fill = legend_colors[i], col = "black"))
+  grid::grid.text(legend_labels[i], x = 0.89, y = y_start - (i - 1)*y_gap, just = "left", gp = gpar(fontsize = 12))
+}
+dev.off()
+
+
+# ADULTS
+pdf(paste0(path_plots,"Phenotype_heatmap_Over18.pdf"), width = 15, height =11 )
+pheatmap(
+  heat_mat_adult_num,
+  color = my_colors,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  fontsize_col = 8,
+  main = paste0("Phenotype presence ≥18 years (n = ", nrow(heat_mat_adult_num), ")")
+)
+dev.off()
+
+```
+```{r}
+
+pdf(paste0(path_plots,"Phenotype_heatmap_Under18.pdf"), width = 15, height =11 )
+pheatmap(
+  heat_mat_child_num,
+  color = my_colors,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  fontsize_col = 8,
+  main = paste0("Phenotype presence <18 years (n = ", nrow(heat_mat_child_num), ")"),
+  
+)
+dev.off()
+```
+
+#Convert to Binary
+```{r}
+# Map Y/N/NE to 1/2/3 for plotting
+heat_mat_numeric <- matrix(
+  dplyr::recode(heat_mat, Y = 1L, N = -1L, NE = 0L),
+  nrow = nrow(heat_mat),
+  ncol = ncol(heat_mat),
+  dimnames = dimnames(heat_mat)
+)
+
+
+# For pheatmap: map Y/N/NE to 1/0/0
+heat_mat_child_num <- matrix(
+  dplyr::recode(heat_mat_child, Y = 1L, N = -1L, NE = 0L),
+  nrow = nrow(heat_mat_child),
+  ncol = ncol(heat_mat_child),
+  dimnames = dimnames(heat_mat_child)
+)
+heat_mat_adult_num <- matrix(
+  dplyr::recode(heat_mat_adult, Y = 1L, N = -1L, NE = 0L),
+  nrow = nrow(heat_mat_adult),
+  ncol = ncol(heat_mat_adult),
+  dimnames = dimnames(heat_mat_adult)
+)
+```
+
+#Keep columns that are both present in UKB and GATA2
+```{r}
+
+select_pheno_final<-select_pheno[select_pheno$Present_in_GATA2=="Yes" & select_pheno$Present_in_UKB=="Yes",]
+
+
+```
+
+
+#Correlation Matrix for all participants
+```{r}
+# Assuming your dataframe is called pheno_df
+# Columns: phenotype names, Rows: participants, Values: 0/1
+
+# Compute correlation matrix
+cor_matrix <- cor(heat_mat_numeric, method = "pearson") # Or use method = "spearman"
+
+# Save as CSV (optional)
+write.csv(cor_matrix, paste0(path_plots,"phenotype_correlation_matrix_all_coding2.csv"))
+
+# To get top correlated pairs
+library(reshape2)
+cor_melt <- melt(cor_matrix)
+cor_melt <- cor_melt[cor_melt$Var1 != cor_melt$Var2, ]
+cor_melt <- cor_melt[abs(cor_melt$value) > 0.5, ]
+cor_melt <- cor_melt[order(-abs(cor_melt$value)), ]
+head(cor_melt)
+
+
+library(ggplot2)
+
+pdf(paste0(path_plots,"Correlation_Plot_119_Labeled_All339_coding2.pdf"),height=10,width=10)
+# If cor_melt is already filtered and sorted as above:
+ggplot(cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Top Phenotype-Phenotype Correlations", x = "", y = "")
+dev.off()
+
+```
+
+
+#Correlation Matrix for Adults only
+
+```{r}
+
+# Assuming your dataframe is called pheno_df
+# Columns: phenotype names, Rows: participants, Values: 0/1
+
+# Compute correlation matrix
+cor_matrix <- cor(heat_mat_adult_num, method = "pearson") # Or use method = "spearman"
+
+# Save as CSV (optional)
+write.csv(cor_matrix, paste0(path_plots,"phenotype_correlation_matrix_adult.csv"))
+
+# To get top correlated pairs
+library(reshape2)
+cor_melt <- melt(cor_matrix)
+cor_melt <- cor_melt[cor_melt$Var1 != cor_melt$Var2, ]
+cor_melt <- cor_melt[abs(cor_melt$value) > 0.5, ]
+cor_melt <- cor_melt[order(-abs(cor_melt$value)), ]
+head(cor_melt)
+
+
+library(ggplot2)
+
+pdf(paste0(path_plots,"Correlation_Plot_119_Labeled_Adult212.pdf"),height=10,width=10)
+# If cor_melt is already filtered and sorted as above:
+ggplot(cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Top Phenotype-Phenotype Correlations", x = "", y = "")
+dev.off()
+
+```
+
+
+
+```{r}
+
+# Assuming your dataframe is called pheno_df
+# Columns: phenotype names, Rows: participants, Values: 0/1
+
+# Compute correlation matrix
+cor_matrix <- cor(heat_mat_child_num, method = "pearson") # Or use method = "spearman"
+
+# Save as CSV (optional)
+write.csv(cor_matrix, paste0(path_plots,"phenotype_correlation_matrix_child.csv"))
+
+# To get top correlated pairs
+library(reshape2)
+cor_melt <- melt(cor_matrix)
+cor_melt <- cor_melt[cor_melt$Var1 != cor_melt$Var2, ]
+cor_melt <- cor_melt[abs(cor_melt$value) > 0.5, ]
+cor_melt <- cor_melt[order(-abs(cor_melt$value)), ]
+head(cor_melt)
+
+
+library(ggplot2)
+
+pdf(paste0(path_plots,"Correlation_Plot_119_Labeled_Child127.pdf"),height=10,width=10)
+# If cor_melt is already filtered and sorted as above:
+ggplot(cor_melt,aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), 
+                       name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Top Phenotype-Phenotype Correlations", x = "", y = "")
+dev.off()
+
+```
+
+```{r}
+# Ensure rownames(heat_mat) is a column for merging
+heat_mat$ParticipantID <- rownames(heat_mat)
+
+# Merge variant type information
+heat_mat_merged <- heat_mat %>%
+  left_join(
+    gata2_survey_data %>% select(prevalence_patient_deidentifier_lab_family_patient, VariantType),
+    by = c("ParticipantID" = "prevalence_patient_deidentifier_lab_family_patient")
+  )
+
+```
+
+
+
+
+
+
+#HEATMAP SPLIT BY ADULT AND PED
+```{r}
+
+getwd()
+# ─────────────────────────────────────────────────────────────
+# 0.  Packages  (install.packages() if needed)
+# ─────────────────────────────────────────────────────────────
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)
+
+# ─────────────────────────────────────────────────────────────
+# 1.  Mapping table: code  →  description
+# ─────────────────────────────────────────────────────────────
+
+mapping_df <- select_pheno %>% dplyr::select(Phenotype, Phenotype_Description)
+
+# ─────────────────────────────────────────────────────────────
+# 2.  Identify phenotype columns present in the main data frame
+# ─────────────────────────────────────────────────────────────
+pheno_cols <- mapping_df$Phenotype         # e.g. "P1"…"P77"
+
+# ─────────────────────────────────────────────────────────────
+# 3.  Build a wide binary matrix  (rows = participants)
+# ─────────────────────────────────────────────────────────────
+wide_df <- phenotype_gata2_og %>%
+  # keep only the needed columns
+  dplyr::select(Age, all_of(pheno_cols)) %>%
+  # turn "Y" into 1, everything else into 0
+  mutate(across(all_of(pheno_cols), ~ ifelse(.x == "Y", 1, 0))) %>%
+  # add age‑group label
+  mutate(age_group = if_else(Age < 18, "<18", "≥18")) 
+
+# ─────────────────────────────────────────────────────────────
+# 4.  Order rows: children first, then adults
+# ─────────────────────────────────────────────────────────────
+wide_df <- wide_df %>% arrange(age_group)
+
+# how many rows go into the first block?   (for the gap)
+n_children <- sum(wide_df$age_group == "<18")
+
+# ─────────────────────────────────────────────────────────────
+# 5.  Drop helper columns & convert to matrix
+# ─────────────────────────────────────────────────────────────
+heat_mat <- wide_df %>%
+  dplyr::select(all_of(pheno_cols)) %>%
+  as.matrix()
+
+# ─────────────────────────────────────────────────────────────
+# 6.  Replace column codes by their descriptions
+# ─────────────────────────────────────────────────────────────
+colnames(heat_mat) <- mapping_df$Phenotype_Description[
+                        match(colnames(heat_mat), mapping_df$Phenotype)]
+
+# ─────────────────────────────────────────────────────────────
+# 7.  Annotation bar for age
+# ─────────────────────────────────────────────────────────────
+row_anno <- data.frame(Age = wide_df$age_group)
+rownames(row_anno) <- rownames(heat_mat)
+
+# colour palette for 0/1
+heat_cols <- colorRampPalette(c("#f7fbff", "#08306b"))(100)
+
+# ─────────────────────────────────────────────────────────────
+# 8.  Plot & save to PDF
+# ─────────────────────────────────────────────────────────────
+pdf("phenotype_heatmap_by_age.pdf", width = 10, height = 8)
+pheatmap(heat_mat,
+         color            = heat_cols,
+         cluster_rows     = TRUE,
+         cluster_cols     = TRUE,
+         annotation_row   = row_anno,
+         annotation_colors = list(Age = c("<18" = "#fc8d59", "≥18" = "#99d594")),
+         gaps_row         = n_children,          # horizontal gap between groups
+         show_rownames    = FALSE,               # hide long IDs; toggle if desired
+         fontsize_col     = 8,
+         main             = "Phenotype presence by age group (n = 339)")+coord_flip()
+dev.off()
+
+# ─────────────────────────────────────────────────────────────
+# 7½.  OPTIONAL FILTER – keep only observed phenotypes
+#      (place right after Step 7, just before writing PDFs)
+# ─────────────────────────────────────────────────────────────
+observed_cols <- colSums(heat_mat, na.rm = TRUE) > 0
+heat_mat      <- heat_mat[ , observed_cols, drop = FALSE]
+
+## 8·1  Children (<18)
+
+heat_mat_child <- heat_mat[wide_df$age_group == "<18", , drop = FALSE]
+col_child<-colSums(heat_mat_child, na.rm = TRUE) > 0
+heat_mat_child<- heat_mat_child[ , col_child, drop = FALSE]
+
+min(colSums(heat_mat_child))
+pdf("phenotype_heatmap_under18.pdf", width = 15, height = 8)
+r<-pheatmap(heat_mat_child,
+         color            = heat_cols,
+         cluster_rows     = TRUE,
+         cluster_cols     = TRUE,
+         show_rownames    = FALSE,
+         fontsize_col     = 8,
+         main             = paste0("Phenotype presence <18 years (n = ",
+                                   nrow(heat_mat_child), ")"))
+dev.off()
+
+
+ggsave("Phenotype_Heatmap_in_Child.png",plot= r ,
+       width  = 12, height = 15, units = "in")
+
+
+## Adult heat‑map
+heat_mat_adult <- heat_mat[wide_df$age_group == "≥18", , drop = FALSE]
+col_adult<-colSums(heat_mat_adult, na.rm = TRUE) > 0
+heat_mat_adult<- heat_mat_adult[ , col_adult, drop = FALSE]
+
+
+pdf("phenotype_heatmap_adult.pdf", width = 10, height = 8)
+pheatmap(heat_mat_adult,
+         color        = heat_cols,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         fontsize_col = 8,
+         main = paste0("Phenotype presence ≥18 years (n = ",
+                       nrow(heat_mat_adult), ")"))
+dev.off()
+p<-pheatmap(heat_mat_adult,
+         color        = heat_cols,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         fontsize_col = 8,
+         main = paste0("Phenotype presence in Adults (n = ",
+                       nrow(heat_mat_adult), ")"))
+
+ggsave("Phenotype_Heatmap_in_Adults.png",plot= p ,
+       width  = 12, height = 15, units = "in")
+
+```
+
+
+
+
+
+
+
+
